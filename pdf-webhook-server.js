@@ -264,71 +264,77 @@ app.post('/processreport', async (req, res) => {
     console.log(`[${new Date().toISOString()}] New process report request`);
     console.log(`${'='.repeat(60)}`);
     
+    // Store request data for processing
+    const requestData = Array.isArray(req.body) ? req.body[0] : req.body;
+    
+    // Quick validation
+    if (!requestData) {
+        return res.status(400).json({ 
+            error: 'Invalid request format',
+            details: 'Request body is empty or invalid'
+        });
+    }
+    
+    // Check for message ID
+    let messageId;
+    if (requestData.latest_message?.id) {
+        messageId = requestData.latest_message.id;
+    } else if (requestData.body?.latest_message?.id) {
+        messageId = requestData.body.latest_message.id;
+    }
+    
+    if (!messageId) {
+        return res.status(400).json({ 
+            error: 'Missing message ID',
+            details: 'Could not find message ID in request'
+        });
+    }
+    
+    // Immediately respond with 200 to acknowledge receipt
+    res.status(200).json({ 
+        success: true,
+        message: 'Webhook received, processing download',
+        messageId: messageId,
+        timestamp: new Date().toISOString()
+    });
+    
+    // Process the download asynchronously (after response sent)
+    processDownloadAsync(requestData, messageId).catch(error => {
+        console.error('❌ Async processing failed:', error);
+    });
+});
+
+// Async function to process the download after responding
+async function processDownloadAsync(requestData, messageId) {
     let context;
     let page;
     let tempDir;
     let downloadPath;
     
     try {
-        // Log incoming request body for debugging
-        console.log('📨 Incoming request:');
-        console.log(`   Content-Type: ${req.headers['content-type']}`);
-        console.log(`   Body type: ${typeof req.body}`);
-        console.log(`   Is Array: ${Array.isArray(req.body)}`);
-        
-        // Handle both array and single object input
-        const requestData = Array.isArray(req.body) ? req.body[0] : req.body;
-        
-        if (!requestData) {
-            console.error('❌ No request data found');
-            return res.status(400).json({ 
-                error: 'Invalid request format',
-                details: 'Request body is empty or invalid'
-            });
-        }
-        
+        // Log processing details
+        console.log('📨 Processing download asynchronously:');
+        console.log(`   Message ID: ${messageId}`);
         console.log('   Request data keys:', Object.keys(requestData));
         
-        // Log the full request body for debugging
-        console.log('\n📋 Full Request Body (first 2000 chars):');
-        const bodyStr = JSON.stringify(requestData, null, 2);
-        console.log(bodyStr.substring(0, 2000));
-        if (bodyStr.length > 2000) {
-            console.log('... (truncated)');
+        // Log the full request body for debugging (optional)
+        if (process.env.DEBUG === 'true') {
+            console.log('\n📋 Full Request Body (first 2000 chars):');
+            const bodyStr = JSON.stringify(requestData, null, 2);
+            console.log(bodyStr.substring(0, 2000));
+            if (bodyStr.length > 2000) {
+                console.log('... (truncated)');
+            }
         }
         
-        // Missive sends the webhook data directly without a 'body' wrapper
-        // The structure is: { rule, conversation, comment, latest_message }
-        // We need to look for latest_message directly in the request data
-        let messageId;
         let webhookUrl;
-        
-        // Check for message ID in different possible locations
-        if (requestData.latest_message?.id) {
-            messageId = requestData.latest_message.id;
-            console.log('✓ Found message ID in latest_message.id');
-        } else if (requestData.body?.latest_message?.id) {
-            messageId = requestData.body.latest_message.id;
-            console.log('✓ Found message ID in body.latest_message.id');
-        }
         
         // Check for webhook URL (may come from n8n wrapper)
         if (requestData.webhookUrl) {
             webhookUrl = requestData.webhookUrl;
-            console.log('✓ Found webhookUrl in request');
+            console.log('   Found webhookUrl in request');
         }
         
-        if (!messageId) {
-            console.error('❌ No message ID found');
-            console.error('   latest_message object:', JSON.stringify(requestData.latest_message || requestData.body?.latest_message, null, 2));
-            return res.status(400).json({ 
-                error: 'Missing message ID',
-                details: 'Could not find message ID in latest_message.id'
-            });
-        }
-        
-        console.log(`\n📋 Extracted Details:`);
-        console.log(`   Message ID: ${messageId}`);
         console.log(`   Webhook URL from request: ${webhookUrl || 'None (will use env vars based on filename)'}`);
         console.log(`   Execution Mode: ${requestData.executionMode || 'not specified'}`);
         
@@ -411,36 +417,18 @@ app.post('/processreport', async (req, res) => {
             }
         }
         
-        const response = {
-            success: true,
-            message: 'File downloaded and sent successfully',
-            messageId: messageId,
-            fileName: fileName,
-            fileSize: `${(fileBuffer.length / 1024).toFixed(2)} KB`,
-            reportType: reportType,
-            webhookUrl: webhookUrl,
-            webhookResponse: webhookResponse.status,
-            downloadRetries: 0,
-            webhookRetries: webhookRetries > 0 ? webhookRetries - 1 : 0,
-            timestamp: new Date().toISOString()
-        };
-        
         console.log(`✅ Success! Report processed and sent`);
         console.log(`   File: ${fileName}`);
         console.log(`   Type: ${reportType}`);
+        console.log(`   Size: ${(fileBuffer.length / 1024).toFixed(2)} KB`);
         console.log(`   Webhook Status: ${webhookResponse.status}`);
-        
-        res.json(response);
+        console.log(`   Download Retries: 0`);
+        console.log(`   Webhook Retries: ${webhookRetries > 0 ? webhookRetries - 1 : 0}`);
         
     } catch (error) {
-        console.error('❌ Error processing download:', error);
+        console.error('❌ Error processing download asynchronously:', error);
         console.error('   Stack:', error.stack);
-        
-        res.status(500).json({ 
-            error: 'Failed to process download',
-            details: error.message,
-            timestamp: new Date().toISOString()
-        });
+        // Since we already responded, just log the error
     } finally {
         // Clean up temp files and directory
         if (downloadPath) {
@@ -483,7 +471,7 @@ app.post('/processreport', async (req, res) => {
         
         console.log(`${'='.repeat(60)}\n`);
     }
-});
+}
 
 // Health check endpoint
 app.get('/health', async (req, res) => {
