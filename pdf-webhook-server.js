@@ -228,15 +228,28 @@ async function downloadWithRetry(page, url, tempDir, retries = 0) {
             console.log('   Navigation completed (direct download expected)');
         });
         
-        // Wait for download to complete
+        // Wait for download to start
         const download = await downloadPromise;
-        const downloadPath = await download.path();
+        
+        // Wait for download to complete and save to our directory
         const fileName = download.suggestedFilename();
+        const targetPath = path.join(tempDir, fileName);
+        
+        // Save the download to our target path
+        await download.saveAs(targetPath);
         
         console.log(`✓ Downloaded file: ${fileName}`);
-        console.log(`   Path: ${downloadPath}`);
+        console.log(`   Saved to: ${targetPath}`);
         
-        return { downloadPath, fileName };
+        // Verify file exists and has content
+        const stats = await fs.stat(targetPath);
+        console.log(`   File size: ${(stats.size / 1024).toFixed(2)} KB`);
+        
+        if (stats.size === 0) {
+            throw new Error('Downloaded file is empty');
+        }
+        
+        return { downloadPath: targetPath, fileName };
         
     } catch (error) {
         console.error(`❌ Download attempt ${retries + 1} failed: ${error.message}`);
@@ -388,8 +401,13 @@ async function processDownloadAsync(requestData, messageId, conversationId) {
         const reportType = webhookConfig.reportType;
         
         // Read the file as binary
+        console.log(`📖 Reading file from: ${downloadPath}`);
         const fileBuffer = await fs.readFile(downloadPath);
-        console.log(`📊 File size: ${(fileBuffer.length / 1024).toFixed(2)} KB`);
+        console.log(`📊 File loaded into memory: ${(fileBuffer.length / 1024).toFixed(2)} KB`);
+        
+        if (!fileBuffer || fileBuffer.length === 0) {
+            throw new Error('Failed to read file or file is empty');
+        }
         
         // Send file to output webhook with retry
         let webhookResponse;
@@ -404,13 +422,18 @@ async function processDownloadAsync(requestData, messageId, conversationId) {
                 console.log(`   Message ID: ${messageId}`);
                 
                 const formData = new FormData();
+                
+                // Ensure buffer is properly attached with correct metadata
                 formData.append('file', fileBuffer, {
                     filename: fileName,
-                    contentType: 'application/pdf'
+                    contentType: 'application/pdf',
+                    knownLength: fileBuffer.length
                 });
                 formData.append('type', reportType);
                 formData.append('conversationId', conversationId || '');
                 formData.append('messageId', messageId);
+                
+                console.log(`   FormData prepared with file: ${fileName} (${fileBuffer.length} bytes)`);
                 
                 webhookResponse = await axios.post(webhookUrl, formData, {
                     headers: {
