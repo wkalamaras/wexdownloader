@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  wexdownloader:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      cache_from:
+        - mcr.microsoft.com/playwright:v1.40.0-focal
+    ports:
+      - "3035:3035"
+    environment:
+      - PORT=3035
+      - MISSIVE_API_KEY=${MISSIVE_API_KEY}
+      - PERSISTENT_DIR=/app/temp
+      - HEADLESS=true
+      - MAX_RETRIES=5
+      - FUELREPORTWEBHOOK=${FUELREPORTWEBHOOK}
+      - EFSREPORTWEBHOOK=${EFSREPORTWEBHOOK}
+    volumes:
+      - ./temp:/app/temp
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3035/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3

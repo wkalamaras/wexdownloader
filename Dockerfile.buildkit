@@ -1,35 +1,32 @@
-# Use the official Playwright image which has browsers pre-installed
+# syntax=docker/dockerfile:1
 FROM mcr.microsoft.com/playwright:v1.40.0-focal
 
-# Create app directory
 WORKDIR /app
 
-# Copy only package files first (for better caching)
+# Copy package files
 COPY package*.json ./
 
-# Install dependencies (this layer will be cached if package.json doesn't change)
-RUN npm ci --only=production
+# Use cache mount for npm cache
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --only=production
 
-# Install Chromium browser (this will also be cached)
-RUN npx playwright install chromium
+# Use cache mount for Playwright browsers
+RUN --mount=type=cache,target=/ms-playwright \
+    npx playwright install chromium
 
-# Copy application files (these change more frequently)
+# Copy application files
 COPY pdf-webhook-server.js ./
 COPY .env.example ./
 
-# Create a non-root user to run the app
+# Create non-root user
 RUN groupadd -r appuser && useradd -r -g appuser appuser \
     && chown -R appuser:appuser /app
 
-# Switch to non-root user
 USER appuser
 
-# Expose the port
 EXPOSE 3053
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD node -e "require('http').get('http://localhost:' + (process.env.PORT || 3053) + '/health', (r) => {r.statusCode === 200 ? process.exit(0) : process.exit(1)})"
 
-# Start the application
 CMD ["node", "pdf-webhook-server.js"]

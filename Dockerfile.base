@@ -1,0 +1,10 @@
+# This creates a base image with Playwright pre-installed
+# Build this once and push to your registry
+FROM mcr.microsoft.com/playwright:v1.40.0-focal
+
+WORKDIR /app
+
+# Install Playwright browsers once in the base image
+RUN npx playwright install chromium
+
+# This base image can be reused
