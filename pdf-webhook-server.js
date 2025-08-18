@@ -15,6 +15,8 @@ const PERSISTENT_DIR = process.env.PERSISTENT_DIR || path.join(os.tmpdir(), 'wex
 const HEADLESS = process.env.HEADLESS !== 'false'; // Default true unless explicitly set to false
 const MAX_RETRIES = parseInt(process.env.MAX_RETRIES || '3');
 const MISSIVE_API_KEY = process.env.MISSIVE_API_KEY;
+const FUELREPORTWEBHOOK = process.env.FUELREPORTWEBHOOK;
+const EFSREPORTWEBHOOK = process.env.EFSREPORTWEBHOOK;
 const RETRY_DELAY = 2000; // 2 seconds
 
 // Validate required environment variables
@@ -74,7 +76,8 @@ async function fetchMissiveMessage(messageId) {
     }
 
     const url = `https://public.missiveapp.com/v1/messages/${messageId}?includeBody=true&includeConversation=true`;
-    console.log(`Fetching message details from Missive API for message: ${messageId}`);
+    console.log(`📡 Fetching message from Missive API...`);
+    console.log(`   URL: ${url}`);
     
     try {
         const response = await axios.get(url, {
@@ -89,18 +92,23 @@ async function fetchMissiveMessage(messageId) {
         
         // Log the structure for debugging
         if (response.data?.messages && Array.isArray(response.data.messages)) {
-            console.log(`  Found ${response.data.messages.length} message(s) in response`);
+            console.log(`   Found ${response.data.messages.length} message(s) in response`);
             if (response.data.messages[0]?.body) {
-                console.log('  Message body found in messages[0].body');
+                console.log('   Message body found in messages[0].body');
+                // Log first 200 chars of body for debugging
+                const bodyPreview = response.data.messages[0].body.substring(0, 200);
+                console.log(`   Body preview: ${bodyPreview}...`);
             }
+        } else {
+            console.log('   Response structure:', Object.keys(response.data));
         }
         
         return response.data;
     } catch (error) {
-        console.error('Failed to fetch from Missive API:', error.message);
+        console.error('❌ Failed to fetch from Missive API:', error.message);
         if (error.response) {
-            console.error('Response status:', error.response.status);
-            console.error('Response data:', error.response.data);
+            console.error('   Response status:', error.response.status);
+            console.error('   Response data:', JSON.stringify(error.response.data).substring(0, 200));
         }
         throw new Error(`Failed to fetch message from Missive: ${error.message}`);
     }
@@ -108,22 +116,30 @@ async function fetchMissiveMessage(messageId) {
 
 // Extract download URL from message body
 function extractDownloadUrl(messageData) {
+    console.log('🔍 Extracting URL from message body...');
+    
     // The message body is in the 'messages' array from Missive API
     let body = '';
     
     // Check for body in different possible locations based on Missive API response structure
     if (messageData.messages && Array.isArray(messageData.messages) && messageData.messages.length > 0) {
         body = messageData.messages[0].body || '';
+        console.log('   Found body in messages[0].body');
     } else if (messageData.message?.body) {
         body = messageData.message.body;
+        console.log('   Found body in message.body');
     } else if (messageData.body) {
         body = messageData.body;
+        console.log('   Found body in root body');
     }
     
-    console.log('Extracting URL from message body...');
+    if (!body) {
+        console.error('❌ No message body found in response');
+        console.error('   Available keys:', Object.keys(messageData));
+        throw new Error('No message body found in Missive response');
+    }
     
     // Primary method: Extract href URL and decode HTML entities
-    // This matches the pattern: href="..." and then decodes &amp; to &
     const hrefMatch = body.match(/href="([^"]+)"/);
     if (hrefMatch && hrefMatch[1]) {
         // Decode HTML entities (especially &amp; to &)
@@ -133,6 +149,7 @@ function extractDownloadUrl(messageData) {
     }
     
     // Fallback patterns if href extraction fails
+    console.log('   Primary extraction failed, trying fallback patterns...');
     const patterns = [
         /Download at:\s*<a[^>]*href="([^"]+)"/i,
         /https:\/\/manage\.fleetone\.com\/[^\s"'<>]+getJobFile[^\s"'<>]+/gi,
@@ -151,14 +168,44 @@ function extractDownloadUrl(messageData) {
     }
     
     // Log the body for debugging if no URL found
-    console.error('Could not find URL in message body. Body content:');
-    console.error(body.substring(0, 500)); // Log first 500 chars for debugging
+    console.error('❌ Could not find URL in message body');
+    console.error('   Body content (first 500 chars):');
+    console.error('   ' + body.substring(0, 500));
     throw new Error('No download URL found in message body');
+}
+
+// Determine webhook URL and type based on filename
+function determineWebhookConfig(fileName) {
+    console.log(`🎯 Determining webhook routing for file: ${fileName}`);
+    
+    let webhookUrl;
+    let reportType;
+    
+    if (fileName.toLowerCase().includes('grandtotalreport')) {
+        webhookUrl = FUELREPORTWEBHOOK;
+        reportType = 'FuelReport';
+        console.log('   ✓ File contains "GrandTotalReport" - routing to FUELREPORTWEBHOOK');
+    } else {
+        webhookUrl = EFSREPORTWEBHOOK;
+        reportType = 'EFSReport';
+        console.log('   ✓ File does not contain "GrandTotalReport" - routing to EFSREPORTWEBHOOK');
+    }
+    
+    if (!webhookUrl) {
+        const envVar = reportType === 'FuelReport' ? 'FUELREPORTWEBHOOK' : 'EFSREPORTWEBHOOK';
+        throw new Error(`${envVar} environment variable is not configured`);
+    }
+    
+    console.log(`   Webhook URL: ${webhookUrl}`);
+    console.log(`   Report Type: ${reportType}`);
+    
+    return { webhookUrl, reportType };
 }
 
 async function downloadWithRetry(page, url, tempDir, retries = 0) {
     try {
-        console.log(`Download attempt ${retries + 1}/${MAX_RETRIES + 1} for URL: ${url}`);
+        console.log(`📥 Download attempt ${retries + 1}/${MAX_RETRIES + 1}`);
+        console.log(`   URL: ${url}`);
         
         // Set up download handler before navigation
         const downloadPromise = page.waitForEvent('download', { timeout: 30000 });
@@ -169,7 +216,7 @@ async function downloadWithRetry(page, url, tempDir, retries = 0) {
             timeout: 30000 
         }).catch(err => {
             // Ignore navigation errors for direct downloads
-            console.log('Navigation completed (direct download expected)');
+            console.log('   Navigation completed (direct download expected)');
         });
         
         // Wait for download to complete
@@ -178,20 +225,23 @@ async function downloadWithRetry(page, url, tempDir, retries = 0) {
         const fileName = download.suggestedFilename();
         
         console.log(`✓ Downloaded file: ${fileName}`);
+        console.log(`   Path: ${downloadPath}`);
         
         return { downloadPath, fileName };
         
     } catch (error) {
+        console.error(`❌ Download attempt ${retries + 1} failed: ${error.message}`);
+        
         if (retries < MAX_RETRIES) {
-            console.log(`Download attempt ${retries + 1} failed, retrying in ${RETRY_DELAY/1000} seconds...`);
-            console.log(`Error was: ${error.message}`);
+            console.log(`   Retrying in ${RETRY_DELAY/1000} seconds...`);
             await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
             
             // Refresh the page before retry
             try {
                 await page.reload({ timeout: 5000 });
+                console.log('   Page reloaded for retry');
             } catch (reloadError) {
-                console.log('Page reload failed, continuing with retry');
+                console.log('   Page reload failed, continuing with retry');
             }
             
             return downloadWithRetry(page, url, tempDir, retries + 1);
@@ -205,49 +255,62 @@ app.post('/processreport', async (req, res) => {
     console.log(`[${new Date().toISOString()}] New process report request`);
     console.log(`${'='.repeat(60)}`);
     
-    // Handle both array and single object input
-    const requestData = Array.isArray(req.body) ? req.body[0] : req.body;
-    
-    if (!requestData || !requestData.body) {
-        return res.status(400).json({ 
-            error: 'Invalid request format',
-            details: 'Request must contain a body object with Missive webhook data'
-        });
-    }
-    
-    const messageId = requestData.body?.latest_message?.id;
-    const webhookUrl = requestData.webhookUrl;
-    
-    if (!messageId) {
-        return res.status(400).json({ 
-            error: 'Missing message ID',
-            details: 'Could not find latest_message.id in request body'
-        });
-    }
-    
-    if (!webhookUrl) {
-        return res.status(400).json({ 
-            error: 'Missing webhook URL',
-            details: 'webhookUrl is required in request'
-        });
-    }
-    
-    console.log(`Message ID: ${messageId}`);
-    console.log(`Webhook URL: ${webhookUrl}`);
-    console.log(`Execution Mode: ${requestData.executionMode || 'unknown'}`);
-    
-    let context;
-    let page;
-    let tempDir;
-    let downloadPath;
-    
     try {
+        // Log incoming request body for debugging
+        console.log('📨 Incoming request:');
+        console.log(`   Content-Type: ${req.headers['content-type']}`);
+        console.log(`   Body type: ${typeof req.body}`);
+        console.log(`   Is Array: ${Array.isArray(req.body)}`);
+        
+        // Handle both array and single object input
+        const requestData = Array.isArray(req.body) ? req.body[0] : req.body;
+        
+        if (!requestData) {
+            console.error('❌ No request data found');
+            return res.status(400).json({ 
+                error: 'Invalid request format',
+                details: 'Request body is empty or invalid'
+            });
+        }
+        
+        console.log('   Request data keys:', Object.keys(requestData));
+        
+        if (!requestData.body) {
+            console.error('❌ No body object in request');
+            console.error('   Available keys:', Object.keys(requestData));
+            return res.status(400).json({ 
+                error: 'Invalid request format',
+                details: 'Request must contain a body object with Missive webhook data'
+            });
+        }
+        
+        const messageId = requestData.body?.latest_message?.id;
+        const providedWebhookUrl = requestData.webhookUrl; // May be overridden based on filename
+        
+        if (!messageId) {
+            console.error('❌ No message ID found');
+            console.error('   body.latest_message:', requestData.body?.latest_message);
+            return res.status(400).json({ 
+                error: 'Missing message ID',
+                details: 'Could not find latest_message.id in request body'
+            });
+        }
+        
+        console.log(`📋 Request Details:`);
+        console.log(`   Message ID: ${messageId}`);
+        console.log(`   Provided Webhook URL: ${providedWebhookUrl || 'None (will use env vars)'}`);
+        console.log(`   Execution Mode: ${requestData.executionMode || 'unknown'}`);
+        
+        let context;
+        let page;
+        let tempDir;
+        let downloadPath;
+        
         // Fetch message details from Missive API
         const messageData = await fetchMissiveMessage(messageId);
         
         // Extract download URL from message
         const downloadUrl = extractDownloadUrl(messageData);
-        console.log(`Download URL extracted: ${downloadUrl}`);
         
         // Ensure browser is initialized
         const browser = await initBrowser();
@@ -255,7 +318,7 @@ app.post('/processreport', async (req, res) => {
         // Create temp directory within persistent directory
         tempDir = path.join(PERSISTENT_DIR, `download-${Date.now()}-${Math.random().toString(36).substring(7)}`);
         await fs.mkdir(tempDir, { recursive: true });
-        console.log(`Created temp directory: ${tempDir}`);
+        console.log(`📁 Created temp directory: ${tempDir}`);
         
         // Create a new context for this download
         context = await browser.newContext({
@@ -270,9 +333,12 @@ app.post('/processreport', async (req, res) => {
         downloadPath = result.downloadPath;
         const fileName = result.fileName;
         
+        // Determine webhook URL and type based on filename
+        const { webhookUrl, reportType } = determineWebhookConfig(fileName);
+        
         // Read the file as binary
         const fileBuffer = await fs.readFile(downloadPath);
-        console.log(`✓ File size: ${(fileBuffer.length / 1024).toFixed(2)} KB`);
+        console.log(`📊 File size: ${(fileBuffer.length / 1024).toFixed(2)} KB`);
         
         // Send file to output webhook with retry
         let webhookResponse;
@@ -280,13 +346,16 @@ app.post('/processreport', async (req, res) => {
         
         while (webhookRetries <= MAX_RETRIES) {
             try {
-                console.log(`Sending to webhook (attempt ${webhookRetries + 1}/${MAX_RETRIES + 1})...`);
+                console.log(`📤 Sending to webhook (attempt ${webhookRetries + 1}/${MAX_RETRIES + 1})...`);
+                console.log(`   URL: ${webhookUrl}`);
+                console.log(`   Report Type: ${reportType}`);
                 
                 const formData = new FormData();
                 formData.append('file', fileBuffer, {
                     filename: fileName,
                     contentType: 'application/pdf'
                 });
+                formData.append('type', reportType);
                 
                 webhookResponse = await axios.post(webhookUrl, formData, {
                     headers: {
@@ -303,10 +372,13 @@ app.post('/processreport', async (req, res) => {
                 
             } catch (webhookError) {
                 webhookRetries++;
+                console.error(`❌ Webhook attempt ${webhookRetries} failed: ${webhookError.message}`);
+                
                 if (webhookRetries > MAX_RETRIES) {
                     throw new Error(`Failed to send to webhook after ${MAX_RETRIES} attempts: ${webhookError.message}`);
                 }
-                console.log(`Webhook attempt ${webhookRetries} failed: ${webhookError.message}`);
+                
+                console.log(`   Retrying in ${RETRY_DELAY/1000} seconds...`);
                 await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
             }
         }
@@ -317,21 +389,28 @@ app.post('/processreport', async (req, res) => {
             messageId: messageId,
             fileName: fileName,
             fileSize: `${(fileBuffer.length / 1024).toFixed(2)} KB`,
+            reportType: reportType,
+            webhookUrl: webhookUrl,
             webhookResponse: webhookResponse.status,
             downloadRetries: 0,
             webhookRetries: webhookRetries > 0 ? webhookRetries - 1 : 0,
             timestamp: new Date().toISOString()
         };
         
-        console.log(`✓ Success:`, response);
+        console.log(`✅ Success! Report processed and sent`);
+        console.log(`   File: ${fileName}`);
+        console.log(`   Type: ${reportType}`);
+        console.log(`   Webhook Status: ${webhookResponse.status}`);
+        
         res.json(response);
         
     } catch (error) {
         console.error('❌ Error processing download:', error);
+        console.error('   Stack:', error.stack);
+        
         res.status(500).json({ 
             error: 'Failed to process download',
             details: error.message,
-            messageId: messageId,
             timestamp: new Date().toISOString()
         });
     } finally {
@@ -339,9 +418,9 @@ app.post('/processreport', async (req, res) => {
         if (downloadPath) {
             try {
                 await fs.unlink(downloadPath);
-                console.log('✓ Cleaned up downloaded file');
+                console.log('🧹 Cleaned up downloaded file');
             } catch (err) {
-                console.error('Error deleting temp file:', err.message);
+                console.error('   Error deleting temp file:', err.message);
             }
         }
         
@@ -350,19 +429,19 @@ app.post('/processreport', async (req, res) => {
                 // List and clean any remaining files
                 const files = await fs.readdir(tempDir);
                 if (files.length > 0) {
-                    console.log(`Cleaning ${files.length} remaining files...`);
+                    console.log(`🧹 Cleaning ${files.length} remaining files...`);
                     for (const file of files) {
                         try {
                             await fs.unlink(path.join(tempDir, file));
                         } catch (err) {
-                            console.error(`Error deleting ${file}:`, err.message);
+                            console.error(`   Error deleting ${file}:`, err.message);
                         }
                     }
                 }
                 await fs.rmdir(tempDir);
-                console.log('✓ Cleaned up temp directory');
+                console.log('🧹 Cleaned up temp directory');
             } catch (err) {
-                console.error('Error deleting temp directory:', err.message);
+                console.error('   Error deleting temp directory:', err.message);
             }
         }
         
@@ -389,7 +468,9 @@ app.get('/health', async (req, res) => {
             headless: HEADLESS,
             maxRetries: MAX_RETRIES,
             persistentDir: PERSISTENT_DIR,
-            missiveApiConfigured: !!MISSIVE_API_KEY
+            missiveApiConfigured: !!MISSIVE_API_KEY,
+            fuelReportWebhookConfigured: !!FUELREPORTWEBHOOK,
+            efsReportWebhookConfigured: !!EFSREPORTWEBHOOK
         },
         uptime: process.uptime(),
         timestamp: new Date().toISOString()
@@ -399,6 +480,7 @@ app.get('/health', async (req, res) => {
 // Endpoint to manually restart browser
 app.post('/restart-browser', async (req, res) => {
     try {
+        console.log('🔄 Restarting browser...');
         if (globalBrowser) {
             await globalBrowser.close();
             globalBrowser = null;
@@ -410,6 +492,7 @@ app.post('/restart-browser', async (req, res) => {
             timestamp: new Date().toISOString()
         });
     } catch (error) {
+        console.error('❌ Failed to restart browser:', error.message);
         res.status(500).json({ 
             error: 'Failed to restart browser',
             details: error.message,
@@ -421,18 +504,20 @@ app.post('/restart-browser', async (req, res) => {
 // Start server
 app.listen(PORT, async () => {
     console.log(`\n${'='.repeat(60)}`);
-    console.log(`WexDownloader Server v3.0`);
+    console.log(`WexDownloader Server v4.0`);
     console.log(`${'='.repeat(60)}`);
-    console.log(`Configuration:`);
-    console.log(`  Port: ${PORT}`);
-    console.log(`  Persistent Directory: ${PERSISTENT_DIR}`);
-    console.log(`  Browser Mode: ${HEADLESS ? 'Headless' : 'Visible'}`);
-    console.log(`  Max Retries: ${MAX_RETRIES}`);
-    console.log(`  Missive API: ${MISSIVE_API_KEY ? '✓ Configured' : '✗ Not configured (WARNING)'}`);
-    console.log(`\nEndpoints:`);
-    console.log(`  POST http://localhost:${PORT}/processreport`);
-    console.log(`  GET  http://localhost:${PORT}/health`);
-    console.log(`  POST http://localhost:${PORT}/restart-browser`);
+    console.log(`📋 Configuration:`);
+    console.log(`   Port: ${PORT}`);
+    console.log(`   Persistent Directory: ${PERSISTENT_DIR}`);
+    console.log(`   Browser Mode: ${HEADLESS ? 'Headless' : 'Visible'}`);
+    console.log(`   Max Retries: ${MAX_RETRIES}`);
+    console.log(`   Missive API: ${MISSIVE_API_KEY ? '✓ Configured' : '✗ Not configured (WARNING)'}`);
+    console.log(`   Fuel Report Webhook: ${FUELREPORTWEBHOOK ? '✓ Configured' : '✗ Not configured'}`);
+    console.log(`   EFS Report Webhook: ${EFSREPORTWEBHOOK ? '✓ Configured' : '✗ Not configured'}`);
+    console.log(`\n📡 Endpoints:`);
+    console.log(`   POST http://localhost:${PORT}/processreport`);
+    console.log(`   GET  http://localhost:${PORT}/health`);
+    console.log(`   POST http://localhost:${PORT}/restart-browser`);
     console.log(`${'='.repeat(60)}\n`);
     
     // Ensure persistent directory exists
