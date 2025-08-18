@@ -91,13 +91,17 @@ async function fetchMissiveMessage(messageId) {
         console.log('✓ Successfully fetched message details from Missive');
         
         // Log the structure for debugging
-        if (response.data?.messages && Array.isArray(response.data.messages)) {
-            console.log(`   Found ${response.data.messages.length} message(s) in response`);
-            if (response.data.messages[0]?.body) {
-                console.log('   Message body found in messages[0].body');
-                // Log first 200 chars of body for debugging
-                const bodyPreview = response.data.messages[0].body.substring(0, 200);
-                console.log(`   Body preview: ${bodyPreview}...`);
+        if (response.data?.messages) {
+            if (typeof response.data.messages === 'object' && !Array.isArray(response.data.messages)) {
+                console.log('   Messages is an object (single message)');
+                if (response.data.messages.body) {
+                    console.log('   Message body found in messages.body');
+                    // Log first 200 chars of body for debugging
+                    const bodyPreview = response.data.messages.body.substring(0, 200);
+                    console.log(`   Body preview: ${bodyPreview}...`);
+                }
+            } else if (Array.isArray(response.data.messages)) {
+                console.log(`   Messages is an array with ${response.data.messages.length} item(s)`);
             }
         } else {
             console.log('   Response structure:', Object.keys(response.data));
@@ -118,13 +122,18 @@ async function fetchMissiveMessage(messageId) {
 function extractDownloadUrl(messageData) {
     console.log('🔍 Extracting URL from message body...');
     
-    // The message body is in the 'messages' array from Missive API
     let body = '';
     
     // Check for body in different possible locations based on Missive API response structure
-    if (messageData.messages && Array.isArray(messageData.messages) && messageData.messages.length > 0) {
+    // The API returns { messages: { body: "..." } } where messages is an OBJECT not array
+    if (messageData.messages && typeof messageData.messages === 'object' && !Array.isArray(messageData.messages)) {
+        // messages is an object (single message)
+        body = messageData.messages.body || '';
+        console.log('   Found body in messages.body (object format)');
+    } else if (messageData.messages && Array.isArray(messageData.messages) && messageData.messages.length > 0) {
+        // messages is an array (multiple messages)
         body = messageData.messages[0].body || '';
-        console.log('   Found body in messages[0].body');
+        console.log('   Found body in messages[0].body (array format)');
     } else if (messageData.message?.body) {
         body = messageData.message.body;
         console.log('   Found body in message.body');
