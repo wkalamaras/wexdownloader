@@ -16,13 +16,19 @@ RUN npx playwright install chromium
 # Copy application files (these change more frequently)
 COPY pdf-webhook-server.js ./
 COPY .env.example ./
+COPY docker-entrypoint.sh ./
+
+# Create temp directory and setup entrypoint
+RUN mkdir -p /app/temp \
+    && chmod +x docker-entrypoint.sh
 
 # Create a non-root user to run the app
 RUN groupadd -r appuser && useradd -r -g appuser appuser \
     && chown -R appuser:appuser /app
 
-# Switch to non-root user
-USER appuser
+# For Coolify persistent volumes, run as root to handle permissions
+# Comment out USER directive to run as root
+# USER appuser
 
 # Expose the port
 EXPOSE 3053
@@ -31,5 +37,5 @@ EXPOSE 3053
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD node -e "require('http').get('http://localhost:' + (process.env.PORT || 3053) + '/health', (r) => {r.statusCode === 200 ? process.exit(0) : process.exit(1)})"
 
-# Start the application
-CMD ["node", "pdf-webhook-server.js"]
+# Use entrypoint script to handle permissions
+ENTRYPOINT ["./docker-entrypoint.sh"]
