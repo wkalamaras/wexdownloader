@@ -351,7 +351,9 @@ app.post('/processreport', async (req, res) => {
         const fileName = result.fileName;
         
         // Determine webhook URL and type based on filename
-        const { webhookUrl, reportType } = determineWebhookConfig(fileName);
+        const webhookConfig = determineWebhookConfig(fileName);
+        webhookUrl = webhookConfig.webhookUrl;  // Override any provided webhook URL
+        const reportType = webhookConfig.reportType;
         
         // Read the file as binary
         const fileBuffer = await fs.readFile(downloadPath);
