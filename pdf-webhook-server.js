@@ -255,6 +255,11 @@ app.post('/processreport', async (req, res) => {
     console.log(`[${new Date().toISOString()}] New process report request`);
     console.log(`${'='.repeat(60)}`);
     
+    let context;
+    let page;
+    let tempDir;
+    let downloadPath;
+    
     try {
         // Log incoming request body for debugging
         console.log('📨 Incoming request:');
@@ -275,36 +280,48 @@ app.post('/processreport', async (req, res) => {
         
         console.log('   Request data keys:', Object.keys(requestData));
         
-        if (!requestData.body) {
-            console.error('❌ No body object in request');
-            console.error('   Available keys:', Object.keys(requestData));
-            return res.status(400).json({ 
-                error: 'Invalid request format',
-                details: 'Request must contain a body object with Missive webhook data'
-            });
+        // Log the full request body for debugging
+        console.log('\n📋 Full Request Body (first 2000 chars):');
+        const bodyStr = JSON.stringify(requestData, null, 2);
+        console.log(bodyStr.substring(0, 2000));
+        if (bodyStr.length > 2000) {
+            console.log('... (truncated)');
         }
         
-        const messageId = requestData.body?.latest_message?.id;
-        const providedWebhookUrl = requestData.webhookUrl; // May be overridden based on filename
+        // Missive sends the webhook data directly without a 'body' wrapper
+        // The structure is: { rule, conversation, comment, latest_message }
+        // We need to look for latest_message directly in the request data
+        let messageId;
+        let webhookUrl;
+        
+        // Check for message ID in different possible locations
+        if (requestData.latest_message?.id) {
+            messageId = requestData.latest_message.id;
+            console.log('✓ Found message ID in latest_message.id');
+        } else if (requestData.body?.latest_message?.id) {
+            messageId = requestData.body.latest_message.id;
+            console.log('✓ Found message ID in body.latest_message.id');
+        }
+        
+        // Check for webhook URL (may come from n8n wrapper)
+        if (requestData.webhookUrl) {
+            webhookUrl = requestData.webhookUrl;
+            console.log('✓ Found webhookUrl in request');
+        }
         
         if (!messageId) {
             console.error('❌ No message ID found');
-            console.error('   body.latest_message:', requestData.body?.latest_message);
+            console.error('   latest_message object:', JSON.stringify(requestData.latest_message || requestData.body?.latest_message, null, 2));
             return res.status(400).json({ 
                 error: 'Missing message ID',
-                details: 'Could not find latest_message.id in request body'
+                details: 'Could not find message ID in latest_message.id'
             });
         }
         
-        console.log(`📋 Request Details:`);
+        console.log(`\n📋 Extracted Details:`);
         console.log(`   Message ID: ${messageId}`);
-        console.log(`   Provided Webhook URL: ${providedWebhookUrl || 'None (will use env vars)'}`);
-        console.log(`   Execution Mode: ${requestData.executionMode || 'unknown'}`);
-        
-        let context;
-        let page;
-        let tempDir;
-        let downloadPath;
+        console.log(`   Webhook URL from request: ${webhookUrl || 'None (will use env vars based on filename)'}`);
+        console.log(`   Execution Mode: ${requestData.executionMode || 'not specified'}`);
         
         // Fetch message details from Missive API
         const messageData = await fetchMissiveMessage(messageId);
