@@ -275,12 +275,20 @@ app.post('/processreport', async (req, res) => {
         });
     }
     
-    // Check for message ID
+    // Check for message ID and conversation ID
     let messageId;
+    let conversationId;
+    
     if (requestData.latest_message?.id) {
         messageId = requestData.latest_message.id;
     } else if (requestData.body?.latest_message?.id) {
         messageId = requestData.body.latest_message.id;
+    }
+    
+    if (requestData.conversation?.id) {
+        conversationId = requestData.conversation.id;
+    } else if (requestData.body?.conversation?.id) {
+        conversationId = requestData.body.conversation.id;
     }
     
     if (!messageId) {
@@ -295,17 +303,18 @@ app.post('/processreport', async (req, res) => {
         success: true,
         message: 'Webhook received, processing download',
         messageId: messageId,
+        conversationId: conversationId || null,
         timestamp: new Date().toISOString()
     });
     
     // Process the download asynchronously (after response sent)
-    processDownloadAsync(requestData, messageId).catch(error => {
+    processDownloadAsync(requestData, messageId, conversationId).catch(error => {
         console.error('❌ Async processing failed:', error);
     });
 });
 
 // Async function to process the download after responding
-async function processDownloadAsync(requestData, messageId) {
+async function processDownloadAsync(requestData, messageId, conversationId) {
     let context;
     let page;
     let tempDir;
@@ -315,6 +324,7 @@ async function processDownloadAsync(requestData, messageId) {
         // Log processing details
         console.log('📨 Processing download asynchronously:');
         console.log(`   Message ID: ${messageId}`);
+        console.log(`   Conversation ID: ${conversationId || 'Not provided'}`);
         console.log('   Request data keys:', Object.keys(requestData));
         
         // Log the full request body for debugging (optional)
