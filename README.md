@@ -1,62 +1,19 @@
 # WexDownloader
 
-A robust Express.js server that downloads files (especially PDFs) using Playwright and forwards them to webhook endpoints. Perfect for automated report processing and file transfer workflows.
+A robust Express.js server that integrates with Missive to automatically download report files and forward them to webhook endpoints. Perfect for automated report processing workflows.
 
 ## Features
 
+- **Missive Integration**: Automatically fetches message details and extracts download URLs
 - **Persistent Browser Instance**: Keeps Playwright browser running between requests for faster processing
-- **Retry Logic**: Automatic retry for both downloads and webhook delivery (up to 3 attempts)
+- **Configurable Retry Logic**: Automatic retry for both downloads and webhook delivery
+- **Environment Variables**: Full configuration through environment variables
 - **Clean Temp Management**: Automatically cleans up temporary files after processing
 - **Health Monitoring**: Built-in health check endpoint for container orchestration
 - **Docker Ready**: Optimized for deployment with Coolify, Kubernetes, or any container platform
-- **Error Resilience**: Comprehensive error handling and graceful shutdown
+- **Verbose Logging**: Detailed logging with visual indicators for debugging
 
-## API Endpoints
-
-### `POST /processreport`
-Downloads a file from a URL and sends it to a webhook endpoint.
-
-**Required Headers:**
-- `INPUTURL`: The URL to download the file from
-- `OUTPUT`: The webhook URL to send the downloaded file to
-
-**Example:**
-```bash
-curl -X POST https://your-domain.com/processreport \
-  -H "INPUTURL: https://example.com/report.pdf" \
-  -H "OUTPUT: https://webhook.site/your-endpoint"
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "File downloaded and sent successfully",
-  "fileName": "report.pdf",
-  "fileSize": "245.67 KB",
-  "webhookResponse": 200,
-  "downloadRetries": 0,
-  "webhookRetries": 0
-}
-```
-
-### `GET /health`
-Health check endpoint for monitoring and container orchestration.
-
-**Response:**
-```json
-{
-  "status": "healthy",
-  "port": 3053,
-  "browser": "running",
-  "uptime": 3600
-}
-```
-
-### `POST /restart-browser`
-Manually restart the Playwright browser instance if needed.
-
-## Installation
+## Quick Start
 
 ### Local Development
 
@@ -71,104 +28,224 @@ cd wexdownloader
 npm install
 ```
 
-3. Start the server:
+3. Create `.env` file:
+```bash
+cp .env.example .env
+# Edit .env and add your MISSIVE_API_KEY
+```
+
+4. Start the server:
 ```bash
 npm start
 ```
 
-The server will start on port 3053 by default (configurable via `PORT` environment variable).
+## API Endpoints
 
-### Docker Deployment
+### `POST /processreport`
 
-1. Build the Docker image:
-```bash
-docker build -t wexdownloader .
+Processes a Missive webhook, downloads the linked file, and forwards it to a specified endpoint.
+
+**Request Body:**
+```json
+{
+  "body": {
+    "latest_message": {
+      "id": "475cde7c-6d2a-e9b8-0e5c-e07ab16fa677",
+      "subject": "Your job 'Wex - Daily Fuel Total Report'",
+      "preview": "Job completed...",
+      "from_field": {
+        "address": "emanager@efsllc.com"
+      }
+    },
+    "conversation": {
+      "id": "a04efb81-5235-42c3-b760-a2e242d1e775",
+      "users": [...]
+    }
+  },
+  "webhookUrl": "https://your-webhook-endpoint.com/receive",
+  "executionMode": "production"
+}
 ```
 
-2. Run the container:
+**Response:**
+```json
+{
+  "success": true,
+  "message": "File downloaded and sent successfully",
+  "messageId": "475cde7c-6d2a-e9b8-0e5c-e07ab16fa677",
+  "fileName": "TransactionReport.pdf",
+  "fileSize": "245.67 KB",
+  "webhookResponse": 200,
+  "downloadRetries": 0,
+  "webhookRetries": 0,
+  "timestamp": "2024-01-15T12:34:56.789Z"
+}
+```
+
+### `GET /health`
+
+Health check endpoint for monitoring and container orchestration.
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "port": 3053,
+  "browser": "running",
+  "config": {
+    "headless": true,
+    "maxRetries": 3,
+    "persistentDir": "/tmp/wexdownloader-temp",
+    "missiveApiConfigured": true
+  },
+  "uptime": 3600,
+  "timestamp": "2024-01-15T12:34:56.789Z"
+}
+```
+
+### `POST /restart-browser`
+
+Manually restart the Playwright browser instance if needed.
+
+## Environment Variables
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `PORT` | Server port | `3053` | No |
+| `MISSIVE_API_KEY` | Missive API key for fetching message details | - | **Yes** |
+| `PERSISTENT_DIR` | Directory for temporary downloads | `{temp}/wexdownloader-temp` | No |
+| `HEADLESS` | Run browser in headless mode | `true` | No |
+| `MAX_RETRIES` | Number of retry attempts | `3` | No |
+
+## How It Works
+
+1. **Webhook Reception**: Receives Missive webhook with message ID
+2. **Message Fetch**: Uses Missive API to fetch full message details
+3. **URL Extraction**: Extracts download URL from message body
+4. **Browser Download**: Uses Playwright to download the file
+5. **Webhook Forward**: Sends file as multipart/form-data to specified webhook
+6. **Cleanup**: Removes temporary files and closes browser context
+
+## Docker Deployment
+
+### Build and Run
+
 ```bash
-docker run -p 3053:3053 wexdownloader
+docker build -t wexdownloader .
+docker run -p 3053:3053 \
+  -e MISSIVE_API_KEY=your_api_key \
+  -e PERSISTENT_DIR=/app/temp \
+  wexdownloader
+```
+
+### Docker Compose
+
+```yaml
+version: '3.8'
+services:
+  wexdownloader:
+    image: wexdownloader
+    ports:
+      - "3053:3053"
+    environment:
+      - MISSIVE_API_KEY=${MISSIVE_API_KEY}
+      - PERSISTENT_DIR=/app/temp
+      - HEADLESS=true
+      - MAX_RETRIES=3
+    volumes:
+      - ./temp:/app/temp
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3053/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
 ```
 
 ### Coolify Deployment
 
 1. Create a new service in Coolify
 2. Connect this GitHub repository
-3. Coolify will automatically detect the Dockerfile and deploy
-4. Configure your domain in Coolify settings
-5. The health check is already configured in the Dockerfile
+3. Add environment variables in Coolify:
+   - `MISSIVE_API_KEY`: Your Missive API key (required)
+   - `PERSISTENT_DIR`: `/app/temp` (recommended)
+   - `HEADLESS`: `true`
+   - `MAX_RETRIES`: `3`
+4. Deploy - Coolify will automatically detect the Dockerfile
 
-## Environment Variables
+## Missive Setup
 
-- `PORT`: Server port (default: 3053)
+1. Get your API key from Missive:
+   - Go to Settings → API → Personal API tokens
+   - Create a new token
+   - Copy the token to your `.env` file
 
-## How It Works
+2. Set up webhook in Missive:
+   - Create a new rule or integration
+   - Set webhook URL to: `https://your-domain.com/processreport`
+   - Configure trigger conditions
 
-1. **Request Reception**: Server receives POST request with file URL and webhook destination
-2. **Browser Context**: Creates isolated browser context for each download
-3. **Download with Retry**: Attempts to download file with automatic retry on failure
-4. **File Processing**: Reads downloaded file as binary data
-5. **Webhook Delivery**: Sends file to specified webhook as multipart/form-data
-6. **Cleanup**: Removes temporary files and closes browser context
+## Architecture
 
-## Architecture Decisions
-
-- **Persistent Browser**: The Playwright browser instance stays running between requests to avoid startup overhead
-- **Context Isolation**: Each request gets its own browser context for security and parallel processing
-- **Temp Directory Management**: Each download gets a unique temp directory that's cleaned up after processing
+- **Persistent Browser**: Browser instance stays running between requests (~500ms saved per request)
+- **Context Isolation**: Each request gets its own browser context for security
+- **Temp Management**: Each download gets a unique directory within the persistent directory
 - **Graceful Shutdown**: Properly closes browser on SIGINT/SIGTERM signals
+- **Verbose Logging**: Detailed console output with visual indicators (✓, ✗, ⚠️)
 
 ## Error Handling
 
-- Automatic retry for failed downloads (up to 3 attempts with 2-second delays)
+- Automatic retry for failed downloads (configurable via `MAX_RETRIES`)
 - Automatic retry for failed webhook deliveries
-- Comprehensive error logging
+- Comprehensive error logging with stack traces
 - Proper cleanup even on failure
 - HTTP status codes for different error scenarios
-
-## Performance Considerations
-
-- Browser stays warm between requests (~500ms saved per request)
-- Parallel request handling through browser contexts
-- Automatic temp file cleanup prevents disk space issues
-- Configurable timeouts for downloads and webhooks
 
 ## Security
 
 - Runs as non-root user in Docker container
-- Input validation for required headers
+- Input validation for all request parameters
 - Isolated browser contexts per request
 - No persistent storage of downloaded files
-
-## Monitoring
-
-The `/health` endpoint provides:
-- Service status
-- Browser instance status  
-- Service uptime
-- Port configuration
-
-Use this endpoint for:
-- Container health checks
-- Load balancer health probes
-- Monitoring system integration
+- API key stored as environment variable
 
 ## Troubleshooting
 
-### Browser won't start
-- Ensure all Playwright dependencies are installed
+### Missive API Key Not Working
+- Verify the API key is correct in your `.env` file
+- Check that the key has proper permissions in Missive
+- Look for error messages in console output
+
+### Downloads Failing
+- Check console logs for specific error messages
+- Verify the URL extraction is working (check logs for "Extracted download URL")
+- Try setting `HEADLESS=false` to see browser behavior
+- Increase `MAX_RETRIES` if downloads are timing out
+
+### Webhook Delivery Failing
+- Verify the webhook URL is correct and accessible
+- Check that the webhook accepts multipart/form-data
+- Review webhook response in console logs
+- Ensure file size isn't exceeding webhook limits
+
+### Browser Issues
+- Use `/restart-browser` endpoint to restart the browser
 - Check available system memory
-- Try restarting with `/restart-browser` endpoint
+- Ensure all Playwright dependencies are installed in Docker
 
-### Downloads failing
-- Verify the INPUTURL is accessible
-- Check for authentication requirements
-- Review retry logs for specific errors
+## Development
 
-### Webhook delivery failing
-- Verify the OUTPUT URL is correct
-- Check webhook endpoint is accepting multipart/form-data
-- Review webhook response in logs
+### Running Tests
+```bash
+npm test
+```
+
+### Debug Mode
+```bash
+# Set in .env file
+HEADLESS=false
+```
+
+This will show the browser window during downloads for debugging.
 
 ## Contributing
 
