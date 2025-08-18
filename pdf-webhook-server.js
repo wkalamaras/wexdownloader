@@ -393,6 +393,8 @@ async function processDownloadAsync(requestData, messageId, conversationId) {
                 console.log(`📤 Sending to webhook (attempt ${webhookRetries + 1}/${MAX_RETRIES + 1})...`);
                 console.log(`   URL: ${webhookUrl}`);
                 console.log(`   Report Type: ${reportType}`);
+                console.log(`   Conversation ID: ${conversationId || 'Not provided'}`);
+                console.log(`   Message ID: ${messageId}`);
                 
                 const formData = new FormData();
                 formData.append('file', fileBuffer, {
@@ -400,6 +402,8 @@ async function processDownloadAsync(requestData, messageId, conversationId) {
                     contentType: 'application/pdf'
                 });
                 formData.append('type', reportType);
+                formData.append('conversationId', conversationId || '');
+                formData.append('messageId', messageId);
                 
                 webhookResponse = await axios.post(webhookUrl, formData, {
                     headers: {
