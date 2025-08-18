@@ -86,6 +86,15 @@ async function fetchMissiveMessage(messageId) {
         });
         
         console.log('✓ Successfully fetched message details from Missive');
+        
+        // Log the structure for debugging
+        if (response.data?.messages && Array.isArray(response.data.messages)) {
+            console.log(`  Found ${response.data.messages.length} message(s) in response`);
+            if (response.data.messages[0]?.body) {
+                console.log('  Message body found in messages[0].body');
+            }
+        }
+        
         return response.data;
     } catch (error) {
         console.error('Failed to fetch from Missive API:', error.message);
@@ -99,30 +108,51 @@ async function fetchMissiveMessage(messageId) {
 
 // Extract download URL from message body
 function extractDownloadUrl(messageData) {
-    // Look for the download URL in the message body
-    // This regex looks for URLs that contain "getJobFile" or similar patterns
-    const body = messageData.message?.body || messageData.body || '';
+    // The message body is in the 'messages' array from Missive API
+    let body = '';
     
-    // Multiple patterns to try
+    // Check for body in different possible locations based on Missive API response structure
+    if (messageData.messages && Array.isArray(messageData.messages) && messageData.messages.length > 0) {
+        body = messageData.messages[0].body || '';
+    } else if (messageData.message?.body) {
+        body = messageData.message.body;
+    } else if (messageData.body) {
+        body = messageData.body;
+    }
+    
+    console.log('Extracting URL from message body...');
+    
+    // Primary method: Extract href URL and decode HTML entities
+    // This matches the pattern: href="..." and then decodes &amp; to &
+    const hrefMatch = body.match(/href="([^"]+)"/);
+    if (hrefMatch && hrefMatch[1]) {
+        // Decode HTML entities (especially &amp; to &)
+        let url = hrefMatch[1].replace(/&amp;/g, '&');
+        console.log(`✓ Extracted download URL: ${url}`);
+        return url;
+    }
+    
+    // Fallback patterns if href extraction fails
     const patterns = [
+        /Download at:\s*<a[^>]*href="([^"]+)"/i,
         /https:\/\/manage\.fleetone\.com\/[^\s"'<>]+getJobFile[^\s"'<>]+/gi,
-        /Download at:\s*(https?:\/\/[^\s"'<>]+)/gi,
-        /href="(https?:\/\/[^\s"]+getJobFile[^\s"]+)"/gi,
         /(https?:\/\/[^\s"'<>]+\.pdf[^\s"'<>]*)/gi
     ];
     
     for (const pattern of patterns) {
         const matches = body.match(pattern);
-        if (matches && matches.length > 0) {
-            // Clean up the URL
-            let url = matches[0];
-            url = url.replace(/^.*?(https?:\/\/)/, '$1'); // Remove any prefix
-            url = url.replace(/["'<>].*$/, ''); // Remove any suffix
-            console.log(`✓ Extracted download URL: ${url}`);
+        if (matches) {
+            let url = matches[1] || matches[0];
+            // Decode HTML entities
+            url = url.replace(/&amp;/g, '&');
+            console.log(`✓ Extracted download URL (fallback): ${url}`);
             return url;
         }
     }
     
+    // Log the body for debugging if no URL found
+    console.error('Could not find URL in message body. Body content:');
+    console.error(body.substring(0, 500)); // Log first 500 chars for debugging
     throw new Error('No download URL found in message body');
 }
 
