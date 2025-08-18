@@ -324,7 +324,7 @@ async function processDownloadAsync(requestData, messageId, conversationId) {
         // Log processing details
         console.log('📨 Processing download asynchronously:');
         console.log(`   Message ID: ${messageId}`);
-        console.log(`   Conversation ID: ${conversationId || 'Not provided'}`);
+        console.log(`   Conversation ID from webhook: ${conversationId || 'Not provided'}`);
         console.log('   Request data keys:', Object.keys(requestData));
         
         // Log the full request body for debugging (optional)
@@ -350,6 +350,13 @@ async function processDownloadAsync(requestData, messageId, conversationId) {
         
         // Fetch message details from Missive API
         const messageData = await fetchMissiveMessage(messageId);
+        
+        // Get the correct conversation ID from the API response
+        // The API returns it at messages.conversation.id
+        if (messageData?.messages?.conversation?.id) {
+            conversationId = messageData.messages.conversation.id;
+            console.log(`✓ Updated conversation ID from API: ${conversationId}`);
+        }
         
         // Extract download URL from message
         const downloadUrl = extractDownloadUrl(messageData);
