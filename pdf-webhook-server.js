@@ -296,6 +296,10 @@ app.post('/processreport', async (req, res) => {
         messageId = requestData.latest_message.id;
     } else if (requestData.body?.latest_message?.id) {
         messageId = requestData.body.latest_message.id;
+    } else if (requestData.message?.id) {
+        messageId = requestData.message.id;
+    } else if (requestData.body?.message?.id) {
+        messageId = requestData.body.message.id;
     }
     
     if (requestData.conversation?.id) {
