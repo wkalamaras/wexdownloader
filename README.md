@@ -263,6 +263,57 @@ This project is licensed under the MIT License.
 
 Will Kalamaras
 
+## Google Apps Scripts Integration
+
+The `googleappscripts/` folder contains a supplementary Google Apps Script that works with Google Sheets to process and analyze the downloaded WEX reports. This is a separate tool that complements the main webhook server.
+
+### Features
+
+- **Automatic Processing**: Processes values on sheet edits via `onEdit()` trigger
+- **Day of Week Calculation**: Automatically determines the day of week for each date entry
+- **Total Calculations**: Sums Fuel and EFS charges for each row
+- **Pay Period Tracking**: Groups charges by Tuesday-Monday pay periods
+- **Weekly Totals**: Automatically aggregates data into weekly summaries
+- **Manual Processing**: Includes a custom menu item for manual value processing
+
+### Setup
+
+1. **Create Google Sheet**: Create a new Google Sheet with two tabs:
+   - "Running Totals" - For daily transaction data
+   - "Weekly Totals" - For aggregated weekly summaries
+
+2. **Add Script**: 
+   - Open Script Editor (Extensions → Apps Script)
+   - Copy contents of `googleappscripts/Wex Charges.gs`
+   - Save and authorize the script
+
+3. **Sheet Structure**:
+   
+   **Running Totals tab columns:**
+   - Column A: Raw Date (YYYY-MM-DD format)
+   - Column B: Day of Week (auto-calculated)
+   - Column C: Fuel Total
+   - Column D: EFS Total
+   - Column E: Wex Total (auto-calculated)
+   - Column F: Pay Period (auto-calculated)
+
+   **Weekly Totals tab columns:**
+   - Column A: Week (Pay Period range)
+   - Column B: Fuel Total
+   - Column C: EFS Total
+   - Column D: Wex Total
+
+### Usage
+
+1. **Automatic**: Simply enter date and charge values in the Running Totals sheet
+2. **Manual**: Use Custom Scripts → Process Values menu item to manually trigger processing
+3. **Weekly Aggregation**: Weekly totals are automatically updated when running totals change
+
+### Screenshots
+
+- `Running Totals View.png` - Example of the daily transaction tracking sheet
+- `Weekly Totals View.png` - Example of the weekly aggregation sheet
+
 ## Support
 
 For issues and questions, please open an issue on [GitHub](https://github.com/wkalamaras/wexdownloader/issues).
