@@ -190,14 +190,20 @@ function determineWebhookConfig(fileName) {
     let webhookUrl;
     let reportType;
     
-    if (fileName.toLowerCase().includes('grandtotalreport')) {
+    const lowerFileName = fileName.toLowerCase();
+    
+    if (lowerFileName.includes('grandtotalreport') || lowerFileName.startsWith('transactionreport')) {
         webhookUrl = FUELREPORTWEBHOOK;
         reportType = 'FuelReport';
-        console.log('   ✓ File contains "GrandTotalReport" - routing to FUELREPORTWEBHOOK');
+        if (lowerFileName.includes('grandtotalreport')) {
+            console.log('   ✓ File contains "GrandTotalReport" - routing to FUELREPORTWEBHOOK');
+        } else {
+            console.log('   ✓ File starts with "TransactionReport" - routing to FUELREPORTWEBHOOK');
+        }
     } else {
         webhookUrl = EFSREPORTWEBHOOK;
         reportType = 'EFSReport';
-        console.log('   ✓ File does not contain "GrandTotalReport" - routing to EFSREPORTWEBHOOK');
+        console.log('   ✓ File does not match Fuel Report patterns - routing to EFSREPORTWEBHOOK');
     }
     
     if (!webhookUrl) {
