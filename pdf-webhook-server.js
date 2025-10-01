@@ -186,12 +186,12 @@ function extractDownloadUrl(messageData) {
 // Determine webhook URL and type based on filename
 function determineWebhookConfig(fileName) {
     console.log(`🎯 Determining webhook routing for file: ${fileName}`);
-    
+
     let webhookUrl;
     let reportType;
-    
+
     const lowerFileName = fileName.toLowerCase();
-    
+
     if (lowerFileName.includes('grandtotalreport') || lowerFileName.startsWith('transactionreport')) {
         webhookUrl = FUELREPORTWEBHOOK;
         reportType = 'FuelReport';
@@ -200,20 +200,24 @@ function determineWebhookConfig(fileName) {
         } else {
             console.log('   ✓ File starts with "TransactionReport" - routing to FUELREPORTWEBHOOK');
         }
+    } else if (lowerFileName === 'enhancedtransactionreport.csv') {
+        webhookUrl = FUELREPORTWEBHOOK;
+        reportType = 'ItemizedFuelReport';
+        console.log('   ✓ File is "EnhancedTransactionReport.csv" - routing to FUELREPORTWEBHOOK as ItemizedFuelReport');
     } else {
         webhookUrl = EFSREPORTWEBHOOK;
         reportType = 'EFSReport';
         console.log('   ✓ File does not match Fuel Report patterns - routing to EFSREPORTWEBHOOK');
     }
-    
+
     if (!webhookUrl) {
-        const envVar = reportType === 'FuelReport' ? 'FUELREPORTWEBHOOK' : 'EFSREPORTWEBHOOK';
+        const envVar = reportType === 'FuelReport' || reportType === 'ItemizedFuelReport' ? 'FUELREPORTWEBHOOK' : 'EFSREPORTWEBHOOK';
         throw new Error(`${envVar} environment variable is not configured`);
     }
-    
+
     console.log(`   Webhook URL: ${webhookUrl}`);
     console.log(`   Report Type: ${reportType}`);
-    
+
     return { webhookUrl, reportType };
 }
 
